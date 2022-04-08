@@ -18,14 +18,17 @@ package azuredisk
 
 import (
 	"context"
+	"fmt"
 	"io/ioutil"
 	"os"
+	"reflect"
 	"testing"
 
-	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2020-12-01/compute"
+	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2021-07-01/compute"
 	"github.com/golang/mock/gomock"
 	"github.com/stretchr/testify/assert"
 	"google.golang.org/grpc/status"
+	clientset "k8s.io/client-go/kubernetes"
 	consts "sigs.k8s.io/azuredisk-csi-driver/pkg/azureconstants"
 	"sigs.k8s.io/cloud-provider-azure/pkg/azureclients/diskclient/mockdiskclient"
 	azure "sigs.k8s.io/cloud-provider-azure/pkg/provider"
@@ -41,12 +44,12 @@ func TestCheckDiskCapacity(t *testing.T) {
 			DiskSizeGB: &size,
 		},
 	}
-	d.getCloud().DisksClient.(*mockdiskclient.MockInterface).EXPECT().Get(gomock.Any(), gomock.Any(), gomock.Any()).Return(disk, nil).AnyTimes()
-	flag, err := d.checkDiskCapacity(context.TODO(), resourceGroup, diskName, 10)
+	d.getCloud().DisksClient.(*mockdiskclient.MockInterface).EXPECT().Get(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(disk, nil).AnyTimes()
+	flag, err := d.checkDiskCapacity(context.TODO(), "", resourceGroup, diskName, 10)
 	assert.Equal(t, flag, true)
 	assert.Nil(t, err)
 
-	flag, err = d.checkDiskCapacity(context.TODO(), resourceGroup, diskName, 11)
+	flag, err = d.checkDiskCapacity(context.TODO(), "", resourceGroup, diskName, 11)
 	assert.Equal(t, flag, false)
 	expectedErr := status.Errorf(6, "the request volume already exists, but its capacity(10) is different from (11)")
 	assert.Equal(t, err, expectedErr)
@@ -130,4 +133,25 @@ func TestDriver_checkDiskExists(t *testing.T) {
 	d, _ := NewFakeDriver(t)
 	_, err := d.checkDiskExists(context.TODO(), "testurl/subscriptions/12/providers/Microsoft.Compute/disks/name")
 	assert.NotEqual(t, err, nil)
+}
+
+func TestGetNodeInfoFromLabels(t *testing.T) {
+	tests := []struct {
+		nodeName      string
+		kubeClient    clientset.Interface
+		expectedError error
+	}{
+		{
+			nodeName:      "",
+			kubeClient:    nil,
+			expectedError: fmt.Errorf("kubeClient is nil"),
+		},
+	}
+
+	for _, test := range tests {
+		_, _, err := getNodeInfoFromLabels(context.TODO(), test.nodeName, test.kubeClient)
+		if !reflect.DeepEqual(err, test.expectedError) {
+			t.Errorf("Unexpected result: %v, expected result: %v", err, test.expectedError)
+		}
+	}
 }

@@ -32,14 +32,15 @@ import (
 )
 
 type PodDetails struct {
-	Cmd       string
-	Volumes   []VolumeDetails
-	IsWindows bool
-	UseCMD    bool
+	Cmd             string
+	Volumes         []VolumeDetails
+	IsWindows       bool
+	UseCMD          bool
+	UseAntiAffinity bool
+	ReplicaCount    int32
 }
 
 type VolumeDetails struct {
-	VolumeType            string
 	FSType                string
 	Encrypted             bool
 	MountOptions          []string
@@ -50,6 +51,7 @@ type VolumeDetails struct {
 	VolumeMode            VolumeMode
 	VolumeMount           VolumeMountDetails
 	VolumeDevice          VolumeDeviceDetails
+	VolumeAccessMode      v1.PersistentVolumeAccessMode
 	// Optional, used with pre-provisioned volumes
 	VolumeID string
 	// Optional, used with PVCs created from snapshots or pvc
@@ -68,8 +70,8 @@ const (
 const (
 	VolumeSnapshotKind = "VolumeSnapshot"
 	VolumePVCKind      = "PersistentVolumeClaim"
-	APIVersionv1beta1  = "v1beta1"
-	SnapshotAPIVersion = "snapshot.storage.k8s.io/" + APIVersionv1beta1
+	APIVersionv1       = "v1"
+	SnapshotAPIVersion = "snapshot.storage.k8s.io/" + APIVersionv1
 )
 
 var (
@@ -178,7 +180,7 @@ func (pod *PodDetails) SetupDeployment(client clientset.Interface, namespace *v1
 	createdStorageClass := tsc.Create()
 	cleanupFuncs = append(cleanupFuncs, tsc.Cleanup)
 	ginkgo.By("setting up the PVC")
-	tpvc := NewTestPersistentVolumeClaim(client, namespace, volume.ClaimSize, volume.VolumeMode, &createdStorageClass)
+	tpvc := NewTestPersistentVolumeClaim(client, namespace, volume.ClaimSize, volume.VolumeMode, volume.VolumeAccessMode, &createdStorageClass)
 	tpvc.Create()
 	if volume.VolumeBindingMode == nil || *volume.VolumeBindingMode == storagev1.VolumeBindingImmediate {
 		tpvc.WaitForBound()
@@ -186,7 +188,28 @@ func (pod *PodDetails) SetupDeployment(client clientset.Interface, namespace *v1
 	}
 	cleanupFuncs = append(cleanupFuncs, tpvc.Cleanup)
 	ginkgo.By("setting up the Deployment")
-	tDeployment := NewTestDeployment(client, namespace, pod.Cmd, tpvc.persistentVolumeClaim, fmt.Sprintf("%s%d", volume.VolumeMount.NameGenerate, 1), fmt.Sprintf("%s%d", volume.VolumeMount.MountPathGenerate, 1), volume.VolumeMount.ReadOnly, pod.IsWindows, pod.UseCMD)
+	if pod.ReplicaCount == 0 {
+		pod.ReplicaCount = 1
+	}
+	tDeployment := NewTestDeployment(client, namespace, pod.ReplicaCount, pod.Cmd, tpvc.persistentVolumeClaim, fmt.Sprintf("%s%d", volume.VolumeMount.NameGenerate, 1), fmt.Sprintf("%s%d", volume.VolumeMount.MountPathGenerate, 1), volume.VolumeMount.ReadOnly, pod.IsWindows, pod.UseCMD, pod.UseAntiAffinity)
+
+	cleanupFuncs = append(cleanupFuncs, tDeployment.Cleanup)
+	return tDeployment, cleanupFuncs
+}
+
+func (pod *PodDetails) SetupDeploymentWithPreProvisionedVolumes(client clientset.Interface, namespace *v1.Namespace, csiDriver driver.PreProvisionedVolumeTestDriver, volumeContext map[string]string) (*TestDeployment, []func()) {
+	cleanupFuncs := make([]func(), 0)
+	volume := pod.Volumes[0]
+
+	ginkgo.By("setting up the PVC")
+	tpvc, funcs := volume.SetupPreProvisionedPersistentVolumeClaim(client, namespace, csiDriver, volumeContext)
+	cleanupFuncs = append(cleanupFuncs, funcs...)
+
+	ginkgo.By("setting up the Deployment")
+	if pod.ReplicaCount == 0 {
+		pod.ReplicaCount = 1
+	}
+	tDeployment := NewTestDeployment(client, namespace, pod.ReplicaCount, pod.Cmd, tpvc.persistentVolumeClaim, fmt.Sprintf("%s%d", volume.VolumeMount.NameGenerate, 1), fmt.Sprintf("%s%d", volume.VolumeMount.MountPathGenerate, 1), volume.VolumeMount.ReadOnly, pod.IsWindows, pod.UseCMD, pod.UseAntiAffinity)
 
 	cleanupFuncs = append(cleanupFuncs, tDeployment.Cleanup)
 	return tDeployment, cleanupFuncs
@@ -201,12 +224,12 @@ func (pod *PodDetails) SetupStatefulset(client clientset.Interface, namespace *v
 	createdStorageClass := tsc.Create()
 	cleanupFuncs = append(cleanupFuncs, tsc.Cleanup)
 	ginkgo.By("setting up the PVC")
-	tpvc := NewTestPersistentVolumeClaim(client, namespace, volume.ClaimSize, volume.VolumeMode, &createdStorageClass)
+	tpvc := NewTestPersistentVolumeClaim(client, namespace, volume.ClaimSize, volume.VolumeMode, volume.VolumeAccessMode, &createdStorageClass)
 	storageClassName := ""
 	if tpvc.storageClass != nil {
 		storageClassName = tpvc.storageClass.Name
 	}
-	tpvc.requestedPersistentVolumeClaim = generateStatefulSetPVC(tpvc.namespace.Name, storageClassName, tpvc.claimSize, tpvc.volumeMode, tpvc.dataSource)
+	tpvc.requestedPersistentVolumeClaim = generatePVC(tpvc.namespace.Name, storageClassName, "pvc", tpvc.claimSize, tpvc.volumeMode, tpvc.accessMode, tpvc.dataSource)
 	ginkgo.By("setting up the statefulset")
 	tStatefulset := NewTestStatefulset(client, namespace, pod.Cmd, tpvc.requestedPersistentVolumeClaim, "pvc", fmt.Sprintf("%s%d", volume.VolumeMount.MountPathGenerate, 1), volume.VolumeMount.ReadOnly, pod.IsWindows, pod.UseCMD)
 
@@ -232,9 +255,9 @@ func (volume *VolumeDetails) SetupDynamicPersistentVolumeClaim(client clientset.
 		if volume.DataSource.Kind == VolumeSnapshotKind {
 			dataSource.APIGroup = &SnapshotAPIGroup
 		}
-		tpvc = NewTestPersistentVolumeClaimWithDataSource(client, namespace, volume.ClaimSize, volume.VolumeMode, storageClass, dataSource)
+		tpvc = NewTestPersistentVolumeClaimWithDataSource(client, namespace, volume.ClaimSize, volume.VolumeMode, volume.VolumeAccessMode, storageClass, dataSource)
 	} else {
-		tpvc = NewTestPersistentVolumeClaim(client, namespace, volume.ClaimSize, volume.VolumeMode, storageClass)
+		tpvc = NewTestPersistentVolumeClaim(client, namespace, volume.ClaimSize, volume.VolumeMode, volume.VolumeAccessMode, storageClass)
 	}
 	tpvc.Create()
 	cleanupFuncs = append(cleanupFuncs, tpvc.Cleanup)
@@ -250,11 +273,15 @@ func (volume *VolumeDetails) SetupDynamicPersistentVolumeClaim(client clientset.
 func (volume *VolumeDetails) SetupPreProvisionedPersistentVolumeClaim(client clientset.Interface, namespace *v1.Namespace, csiDriver driver.PreProvisionedVolumeTestDriver, volumeContext map[string]string) (*TestPersistentVolumeClaim, []func()) {
 	cleanupFuncs := make([]func(), 0)
 	ginkgo.By("setting up the PV")
-	pv := csiDriver.GetPersistentVolume(volume.VolumeID, volume.FSType, volume.ClaimSize, volume.ReclaimPolicy, namespace.Name, volumeContext)
+	volumeMode := v1.PersistentVolumeFilesystem
+	if volume.VolumeMode == Block {
+		volumeMode = v1.PersistentVolumeBlock
+	}
+	pv := csiDriver.GetPersistentVolume(volume.VolumeID, volume.FSType, volume.ClaimSize, volumeMode, volume.VolumeAccessMode, volume.ReclaimPolicy, namespace.Name, volumeContext)
 	tpv := NewTestPreProvisionedPersistentVolume(client, pv)
 	tpv.Create()
 	ginkgo.By("setting up the PVC")
-	tpvc := NewTestPersistentVolumeClaim(client, namespace, volume.ClaimSize, volume.VolumeMode, nil)
+	tpvc := NewTestPersistentVolumeClaim(client, namespace, volume.ClaimSize, volume.VolumeMode, volume.VolumeAccessMode, nil)
 	tpvc.Create()
 	cleanupFuncs = append(cleanupFuncs, tpvc.DeleteBoundPersistentVolume)
 	cleanupFuncs = append(cleanupFuncs, tpvc.Cleanup)

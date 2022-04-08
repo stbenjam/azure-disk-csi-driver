@@ -59,6 +59,7 @@ var (
 	isAzureStackCloud         = strings.EqualFold(os.Getenv(cloudNameEnvVar), "AZURESTACKCLOUD")
 	location                  string
 	supportsZRS               bool
+	supportsDynamicResize     bool
 )
 
 type testCmd struct {
@@ -90,8 +91,37 @@ var _ = ginkgo.BeforeSuite(func() {
 
 		location = creds.Location
 
-		if location == "westus2" || location == "westeurope" {
+		if location == "westus2" || location == "westeurope" || location == "northeurope" || location == "francecentral" {
 			supportsZRS = true
+		}
+
+		dynamicResizeZones := []string{
+			"westcentralus",
+			"francesouth",
+			"westindia",
+			"norwaywest",
+			"eastasia",
+			"francecentral",
+			"germanywestcentral",
+			"japanwest",
+			"southafricanorth",
+			"jioindiawest",
+			"canadacentral",
+			"australiacentral",
+			"japaneast",
+			"northeurope",
+			"centralindia",
+			"uaecentral",
+			"switzerlandwest",
+			"brazilsouth",
+			"uksouth"}
+
+		supportsDynamicResize = false
+		for _, zone := range dynamicResizeZones {
+			if location == zone {
+				supportsDynamicResize = true
+				break
+			}
 		}
 
 		// Install Azure Disk CSI Driver on cluster from project root
@@ -272,8 +302,14 @@ func skipIfOnAzureStackCloud() {
 }
 
 func skipIfNotZRSSupported() {
-	if !(location == "westus2" || location == "westeurope") {
+	if !supportsZRS {
 		ginkgo.Skip("test case not supported on regions without ZRS")
+	}
+}
+
+func skipIfNotDynamicallyResizeSuported() {
+	if !supportsDynamicResize {
+		ginkgo.Skip("test case not supported on regions without dynamic resize support")
 	}
 }
 
@@ -293,6 +329,8 @@ func convertToPowershellorCmdCommandIfNecessary(command string) string {
 		return "echo 'hello world' | Out-File -Append -FilePath C:\\mnt\\test-1\\data.txt; Get-Content C:\\mnt\\test-1\\data.txt | findstr 'hello world'; Start-Sleep 3600"
 	case "echo 'hello world' > /mnt/test-1/data && echo 'hello world' > /mnt/test-2/data && echo 'hello world' > /mnt/test-3/data && grep 'hello world' /mnt/test-1/data && grep 'hello world' /mnt/test-2/data && grep 'hello world' /mnt/test-3/data":
 		return "echo 'hello world' | Out-File -FilePath C:\\mnt\\test-1\\data.txt; Get-Content C:\\mnt\\test-1\\data.txt | findstr 'hello world'; echo 'hello world' | Out-File -FilePath C:\\mnt\\test-2\\data.txt; Get-Content C:\\mnt\\test-2\\data.txt | findstr 'hello world'; echo 'hello world' | Out-File -FilePath C:\\mnt\\test-3\\data.txt; Get-Content C:\\mnt\\test-3\\data.txt | findstr 'hello world'"
+	case "while true; do sleep 5; done":
+		return "while ($true) { Start-Sleep 5 }"
 	}
 
 	return command

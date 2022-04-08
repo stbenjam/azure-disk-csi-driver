@@ -76,7 +76,7 @@ func (t *dynamicProvisioningTestSuite) defineTests(isMultiZone bool) {
 		ns = f.Namespace
 
 		var err error
-		snapshotrcs, err = restClient(testsuites.SnapshotAPIGroup, testsuites.APIVersionv1beta1)
+		snapshotrcs, err = restClient(testsuites.SnapshotAPIGroup, testsuites.APIVersionv1)
 		if err != nil {
 			ginkgo.Fail(fmt.Sprintf("could not get rest clientset: %v", err))
 		}
@@ -117,6 +117,7 @@ func (t *dynamicProvisioningTestSuite) defineTests(isMultiZone bool) {
 							NameGenerate:      "test-volume-",
 							MountPathGenerate: "/mnt/test-",
 						},
+						VolumeAccessMode: v1.ReadWriteOnce,
 					},
 				}, isMultiZone),
 				IsWindows: isWindowsCluster,
@@ -167,6 +168,7 @@ func (t *dynamicProvisioningTestSuite) defineTests(isMultiZone bool) {
 							NameGenerate:      "test-volume-",
 							MountPathGenerate: "/mnt/test-",
 						},
+						VolumeAccessMode: v1.ReadWriteOnce,
 					},
 				},
 				IsWindows: isWindowsCluster,
@@ -201,6 +203,7 @@ func (t *dynamicProvisioningTestSuite) defineTests(isMultiZone bool) {
 							NameGenerate:      "test-volume-",
 							MountPathGenerate: "/mnt/test-",
 						},
+						VolumeAccessMode: v1.ReadWriteOnce,
 					},
 				}, isMultiZone),
 				IsWindows: isWindowsCluster,
@@ -239,6 +242,7 @@ func (t *dynamicProvisioningTestSuite) defineTests(isMultiZone bool) {
 							NameGenerate:      "test-volume-",
 							MountPathGenerate: "/mnt/test-",
 						},
+						VolumeAccessMode: v1.ReadWriteOnce,
 					},
 				}, isMultiZone),
 			},
@@ -271,6 +275,7 @@ func (t *dynamicProvisioningTestSuite) defineTests(isMultiZone bool) {
 							NameGenerate: "test-volume-",
 							DevicePath:   "/dev/e2e-test",
 						},
+						VolumeAccessMode: v1.ReadWriteOnce,
 					},
 				}, isMultiZone),
 			},
@@ -301,6 +306,7 @@ func (t *dynamicProvisioningTestSuite) defineTests(isMultiZone bool) {
 							MountPathGenerate: "/mnt/test-",
 							ReadOnly:          true,
 						},
+						VolumeAccessMode: v1.ReadWriteOnce,
 					},
 				}, isMultiZone),
 				IsWindows: isWindowsCluster,
@@ -332,6 +338,7 @@ func (t *dynamicProvisioningTestSuite) defineTests(isMultiZone bool) {
 							NameGenerate:      "test-volume-",
 							MountPathGenerate: "/mnt/test-",
 						},
+						VolumeAccessMode: v1.ReadWriteOnce,
 					},
 				}, isMultiZone),
 				IsWindows: isWindowsCluster,
@@ -346,6 +353,7 @@ func (t *dynamicProvisioningTestSuite) defineTests(isMultiZone bool) {
 							NameGenerate:      "test-volume-",
 							MountPathGenerate: "/mnt/test-",
 						},
+						VolumeAccessMode: v1.ReadWriteOnce,
 					},
 				}, isMultiZone),
 				IsWindows: isWindowsCluster,
@@ -360,6 +368,7 @@ func (t *dynamicProvisioningTestSuite) defineTests(isMultiZone bool) {
 							NameGenerate:      "test-volume-",
 							MountPathGenerate: "/mnt/test-",
 						},
+						VolumeAccessMode: v1.ReadWriteOnce,
 					},
 				}, isMultiZone),
 				IsWindows: isWindowsCluster,
@@ -389,6 +398,7 @@ func (t *dynamicProvisioningTestSuite) defineTests(isMultiZone bool) {
 						NameGenerate:      "test-volume-",
 						MountPathGenerate: "/mnt/test-",
 					},
+					VolumeAccessMode: v1.ReadWriteOnce,
 				},
 			}, isMultiZone),
 			IsWindows: isWindowsCluster,
@@ -416,9 +426,10 @@ func (t *dynamicProvisioningTestSuite) defineTests(isMultiZone bool) {
 		reclaimPolicy := v1.PersistentVolumeReclaimDelete
 		volumes := t.normalizeVolumes([]testsuites.VolumeDetails{
 			{
-				FSType:        "ext4",
-				ClaimSize:     "10Gi",
-				ReclaimPolicy: &reclaimPolicy,
+				FSType:           "ext4",
+				ClaimSize:        "10Gi",
+				ReclaimPolicy:    &reclaimPolicy,
+				VolumeAccessMode: v1.ReadWriteOnce,
 			},
 		}, isMultiZone)
 		test := testsuites.DynamicallyProvisionedReclaimPolicyTest{
@@ -437,9 +448,10 @@ func (t *dynamicProvisioningTestSuite) defineTests(isMultiZone bool) {
 		reclaimPolicy := v1.PersistentVolumeReclaimRetain
 		volumes := t.normalizeVolumes([]testsuites.VolumeDetails{
 			{
-				FSType:        "ext4",
-				ClaimSize:     "10Gi",
-				ReclaimPolicy: &reclaimPolicy,
+				FSType:           "ext4",
+				ClaimSize:        "10Gi",
+				ReclaimPolicy:    &reclaimPolicy,
+				VolumeAccessMode: v1.ReadWriteOnce,
 			},
 		}, isMultiZone)
 		test := testsuites.DynamicallyProvisionedReclaimPolicyTest{
@@ -464,6 +476,7 @@ func (t *dynamicProvisioningTestSuite) defineTests(isMultiZone bool) {
 						NameGenerate:      "test-volume-",
 						MountPathGenerate: "/mnt/test-",
 					},
+					VolumeAccessMode: v1.ReadWriteOnce,
 				},
 			}, isMultiZone),
 		}
@@ -478,13 +491,6 @@ func (t *dynamicProvisioningTestSuite) defineTests(isMultiZone bool) {
 				"skuName": "Standard_LRS",
 				"fsType":  "xfs",
 			},
-		}
-		if !isUsingInTreeVolumePlugin && supportsZRS {
-			test.StorageClassParameters = map[string]string{
-				"skuName":             "StandardSSD_ZRS",
-				"networkAccessPolicy": "DenyAll",
-				"fsType":              "btrfs",
-			}
 		}
 		test.Run(cs, ns)
 	})
@@ -502,6 +508,7 @@ func (t *dynamicProvisioningTestSuite) defineTests(isMultiZone bool) {
 						NameGenerate:      "test-volume-",
 						MountPathGenerate: "/mnt/test-",
 					},
+					VolumeAccessMode: v1.ReadWriteOnce,
 				},
 			}, isMultiZone),
 		}
@@ -543,6 +550,7 @@ func (t *dynamicProvisioningTestSuite) defineTests(isMultiZone bool) {
 							NameGenerate:      "test-volume-",
 							MountPathGenerate: "/mnt/test-",
 						},
+						VolumeAccessMode: v1.ReadWriteOnce,
 					},
 					{
 						FSType:    "ext4",
@@ -551,6 +559,7 @@ func (t *dynamicProvisioningTestSuite) defineTests(isMultiZone bool) {
 							NameGenerate:      "test-volume-",
 							MountPathGenerate: "/mnt/test-",
 						},
+						VolumeAccessMode: v1.ReadWriteOnce,
 					},
 					{
 						FSType:    "xfs",
@@ -559,6 +568,7 @@ func (t *dynamicProvisioningTestSuite) defineTests(isMultiZone bool) {
 							NameGenerate:      "test-volume-",
 							MountPathGenerate: "/mnt/test-",
 						},
+						VolumeAccessMode: v1.ReadWriteOnce,
 					},
 				}, isMultiZone),
 				IsWindows: isWindowsCluster,
@@ -592,6 +602,7 @@ func (t *dynamicProvisioningTestSuite) defineTests(isMultiZone bool) {
 							NameGenerate:      "test-volume-",
 							MountPathGenerate: "/mnt/test-",
 						},
+						VolumeAccessMode: v1.ReadWriteOnce,
 					},
 					{
 						FSType:       "ext4",
@@ -602,6 +613,7 @@ func (t *dynamicProvisioningTestSuite) defineTests(isMultiZone bool) {
 							NameGenerate: "test-block-volume-",
 							DevicePath:   "/dev/xvda",
 						},
+						VolumeAccessMode: v1.ReadWriteOnce,
 					},
 				}, isMultiZone),
 			},
@@ -631,6 +643,7 @@ func (t *dynamicProvisioningTestSuite) defineTests(isMultiZone bool) {
 						NameGenerate:      "test-volume-",
 						MountPathGenerate: "/mnt/test-",
 					},
+					VolumeAccessMode: v1.ReadWriteOnce,
 				},
 			}, isMultiZone),
 		}
@@ -667,6 +680,7 @@ func (t *dynamicProvisioningTestSuite) defineTests(isMultiZone bool) {
 						NameGenerate:      "test-volume-",
 						MountPathGenerate: "/mnt/test-",
 					},
+					VolumeAccessMode: v1.ReadWriteOnce,
 				},
 			}, isMultiZone),
 		}
@@ -705,6 +719,7 @@ func (t *dynamicProvisioningTestSuite) defineTests(isMultiZone bool) {
 					NameGenerate:      "test-volume-",
 					MountPathGenerate: "/mnt/test-",
 				},
+				VolumeAccessMode: v1.ReadWriteOnce,
 			}
 			volumes = append(volumes, volume)
 		}
@@ -731,6 +746,7 @@ func (t *dynamicProvisioningTestSuite) defineTests(isMultiZone bool) {
 				NameGenerate:      "test-volume-",
 				MountPathGenerate: "/mnt/test-",
 			},
+			VolumeAccessMode: v1.ReadWriteOnce,
 		}
 		pod := testsuites.PodDetails{
 			Cmd: convertToPowershellorCmdCommandIfNecessary("while true; do echo $(date -u) >> /mnt/test-1/data; sleep 3600; done"),
@@ -741,7 +757,8 @@ func (t *dynamicProvisioningTestSuite) defineTests(isMultiZone bool) {
 						"barrier=1",
 						"acl",
 					},
-					VolumeMount: volume.VolumeMount,
+					VolumeMount:      volume.VolumeMount,
+					VolumeAccessMode: v1.ReadWriteOnce,
 				},
 			}, isMultiZone),
 			IsWindows: isWindowsCluster,
@@ -752,6 +769,7 @@ func (t *dynamicProvisioningTestSuite) defineTests(isMultiZone bool) {
 			CSIDriver:              testDriver,
 			Volume:                 volume,
 			Pod:                    pod,
+			ResizeOffline:          true,
 			StorageClassParameters: map[string]string{"skuName": "Standard_LRS"},
 		}
 		if !isUsingInTreeVolumePlugin && supportsZRS {
@@ -759,6 +777,85 @@ func (t *dynamicProvisioningTestSuite) defineTests(isMultiZone bool) {
 				"skuName": "StandardSSD_ZRS",
 				"fsType":  "btrfs",
 			}
+		}
+		test.Run(cs, ns)
+	})
+
+	ginkgo.It("should create a volume on demand and dynamically resize it without detaching [disk.csi.azure.com] ", func() {
+		skipIfUsingInTreeVolumePlugin()
+		skipIfNotDynamicallyResizeSuported()
+		//Subscription must be registered for LiveResize
+		volume := testsuites.VolumeDetails{
+			ClaimSize: "10Gi",
+			VolumeMount: testsuites.VolumeMountDetails{
+				NameGenerate:      "test-volume-",
+				MountPathGenerate: "/mnt/test-",
+			},
+			VolumeAccessMode: v1.ReadWriteOnce,
+		}
+		pod := testsuites.PodDetails{
+			Cmd: convertToPowershellorCmdCommandIfNecessary("while true; do echo $(date -u) >> /mnt/test-1/data; sleep 3600; done"),
+			Volumes: t.normalizeVolumes([]testsuites.VolumeDetails{
+				{
+					ClaimSize: volume.ClaimSize,
+					MountOptions: []string{
+						"barrier=1",
+						"acl",
+					},
+					VolumeMount:      volume.VolumeMount,
+					VolumeAccessMode: v1.ReadWriteOnce,
+				},
+			}, isMultiZone),
+			IsWindows: isWindowsCluster,
+			UseCMD:    false,
+		}
+
+		test := testsuites.DynamicallyProvisionedResizeVolumeTest{
+			CSIDriver:              testDriver,
+			Volume:                 volume,
+			Pod:                    pod,
+			ResizeOffline:          false,
+			StorageClassParameters: map[string]string{"skuName": "Standard_LRS"},
+		}
+		test.Run(cs, ns)
+	})
+
+	ginkgo.It("should create a block volume on demand and dynamically resize it without detaching [disk.csi.azure.com] ", func() {
+		skipIfUsingInTreeVolumePlugin()
+		skipIfNotDynamicallyResizeSuported()
+		//Subscription must be registered for LiveResize
+		volume := testsuites.VolumeDetails{
+			ClaimSize: "10Gi",
+			VolumeMount: testsuites.VolumeMountDetails{
+				NameGenerate:      "test-volume-",
+				MountPathGenerate: "/mnt/test-",
+			},
+			VolumeAccessMode: v1.ReadWriteOnce,
+			VolumeMode:       testsuites.Block,
+		}
+		pod := testsuites.PodDetails{
+			Cmd: convertToPowershellorCmdCommandIfNecessary("while true; do echo $(date -u) >> /mnt/test-1/data; sleep 3600; done"),
+			Volumes: t.normalizeVolumes([]testsuites.VolumeDetails{
+				{
+					ClaimSize: volume.ClaimSize,
+					MountOptions: []string{
+						"barrier=1",
+						"acl",
+					},
+					VolumeMount:      volume.VolumeMount,
+					VolumeAccessMode: v1.ReadWriteOnce,
+				},
+			}, isMultiZone),
+			IsWindows: isWindowsCluster,
+			UseCMD:    false,
+		}
+
+		test := testsuites.DynamicallyProvisionedResizeVolumeTest{
+			CSIDriver:              testDriver,
+			Volume:                 volume,
+			Pod:                    pod,
+			ResizeOffline:          false,
+			StorageClassParameters: map[string]string{"skuName": "Standard_LRS"},
 		}
 		test.Run(cs, ns)
 	})
@@ -779,6 +876,7 @@ func (t *dynamicProvisioningTestSuite) defineTests(isMultiZone bool) {
 							NameGenerate:      "test-volume-",
 							MountPathGenerate: "/mnt/test-",
 						},
+						VolumeAccessMode: v1.ReadWriteOnce,
 					},
 				}, isMultiZone),
 				IsWindows: isWindowsCluster,
@@ -812,6 +910,7 @@ func (t *dynamicProvisioningTestSuite) defineTests(isMultiZone bool) {
 							NameGenerate:      "test-volume-",
 							MountPathGenerate: "/mnt/test-",
 						},
+						VolumeAccessMode: v1.ReadWriteOnce,
 					},
 				}, isMultiZone),
 				IsWindows: isWindowsCluster,
@@ -839,6 +938,7 @@ func (t *dynamicProvisioningTestSuite) defineTests(isMultiZone bool) {
 						NameGenerate:      "pvc",
 						MountPathGenerate: "/mnt/test-",
 					},
+					VolumeAccessMode: v1.ReadWriteOnce,
 				},
 			}, isMultiZone),
 			IsWindows: isWindowsCluster,
@@ -864,6 +964,7 @@ func (t *dynamicProvisioningTestSuite) defineTests(isMultiZone bool) {
 
 	ginkgo.It("Should test pod failover with cordoning a node", func() {
 		skipIfUsingInTreeVolumePlugin()
+		skipIfTestingInWindowsCluster()
 		if isMultiZone {
 			ginkgo.Skip("test case does not apply to multi az case")
 		}
@@ -874,6 +975,7 @@ func (t *dynamicProvisioningTestSuite) defineTests(isMultiZone bool) {
 				NameGenerate:      "test-volume-",
 				MountPathGenerate: "/mnt/test-",
 			},
+			VolumeAccessMode: v1.ReadWriteOnce,
 		}
 		pod := testsuites.PodDetails{
 			Cmd: convertToPowershellorCmdCommandIfNecessary("echo 'hello world' >> /mnt/test-1/data && while true; do sleep 3600; done"),
@@ -884,7 +986,8 @@ func (t *dynamicProvisioningTestSuite) defineTests(isMultiZone bool) {
 						"barrier=1",
 						"acl",
 					},
-					VolumeMount: volume.VolumeMount,
+					VolumeMount:      volume.VolumeMount,
+					VolumeAccessMode: volume.VolumeAccessMode,
 				},
 			}, false),
 			IsWindows: isWindowsCluster,
@@ -923,6 +1026,7 @@ func (t *dynamicProvisioningTestSuite) defineTests(isMultiZone bool) {
 				NameGenerate:      "test-volume-",
 				MountPathGenerate: "/mnt/test-",
 			},
+			VolumeAccessMode: v1.ReadWriteOnce,
 		}
 		pod := testsuites.PodDetails{
 			Cmd: convertToPowershellorCmdCommandIfNecessary("echo 'hello world' >> /mnt/test-1/data && while true; do sleep 3600; done"),
@@ -933,7 +1037,8 @@ func (t *dynamicProvisioningTestSuite) defineTests(isMultiZone bool) {
 						"barrier=1",
 						"acl",
 					},
-					VolumeMount: volume.VolumeMount,
+					VolumeMount:      volume.VolumeMount,
+					VolumeAccessMode: volume.VolumeAccessMode,
 				},
 			}, false),
 			IsWindows: isWindowsCluster,
@@ -956,6 +1061,69 @@ func (t *dynamicProvisioningTestSuite) defineTests(isMultiZone bool) {
 				Cmd:            podCheckCmd,
 				ExpectedString: expectedString, // pod will be restarted so expect to see 2 instances of string
 			},
+			StorageClassParameters: storageClassParameters,
+		}
+		test.Run(cs, ns)
+	})
+
+	ginkgo.It("should succeed when attaching a shared block volume to multiple pods [disk.csi.azure.com][shared disk]", func() {
+		skipIfUsingInTreeVolumePlugin()
+		skipIfOnAzureStackCloud()
+		skipIfTestingInWindowsCluster()
+		if isMultiZone {
+			skipIfNotZRSSupported()
+		}
+
+		pod := testsuites.PodDetails{
+			Cmd: convertToPowershellorCmdCommandIfNecessary("while true; do sleep 5; done"),
+			Volumes: t.normalizeVolumes([]testsuites.VolumeDetails{
+				{
+					ClaimSize: "10Gi",
+					VolumeMount: testsuites.VolumeMountDetails{
+						NameGenerate:      "test-shared-volume-",
+						MountPathGenerate: "/dev/shared-",
+					},
+					VolumeMode:       testsuites.Block,
+					VolumeAccessMode: v1.ReadWriteMany,
+				},
+			}, isMultiZone),
+			UseCMD:          false,
+			IsWindows:       isWindowsCluster,
+			UseAntiAffinity: isMultiZone,
+			ReplicaCount:    2,
+		}
+
+		storageClassParameters := map[string]string{
+			"skuname":     "StandardSSD_LRS",
+			"maxshares":   "2",
+			"cachingmode": "None",
+		}
+		if supportsZRS {
+			storageClassParameters["skuname"] = "StandardSSD_ZRS"
+		}
+
+		podCheck := &testsuites.PodExecCheck{
+			ExpectedString: "VOLUME ATTACHED",
+		}
+		if !isWindowsCluster {
+			podCheck.Cmd = []string{
+				"sh",
+				"-c",
+				"(stat /dev/shared-1 > /dev/null) && echo \"VOLUME ATTACHED\"",
+			}
+		} else {
+			podCheck.Cmd = []string{
+				"powershell",
+				"-NoLogo",
+				"-Command",
+				"if (Test-Path c:\\dev\\shared-1) { \"VOLUME ATTACHED\" | Out-Host }",
+			}
+		}
+
+		test := testsuites.DynamicallyProvisionedSharedDiskTester{
+			CSIDriver:              testDriver,
+			Pod:                    pod,
+			PodCheck:               podCheck,
 			StorageClassParameters: storageClassParameters,
 		}
 		test.Run(cs, ns)
