@@ -1,10 +1,16 @@
-# Volume Resizing Example
+# Volume online resize
 
-Currently, Azure Disk CSI Driver only supports resizing unattached disk.
+Azure Disk CSI Driver now supports resizing **attached** disk from v1.11
 
-## Example
+Note:
+ - Pod restart on agent node is not necessary from v1.11.
 
-1. Set `allowVolumeExpansion` field as true in the storage class.
+## Prerequisite
+#### 1. follow this [guide](https://docs.microsoft.com/en-us/azure/virtual-machines/linux/expand-disks#expand-an-azure-managed-disk) to register `LiveResize` feature
+
+#### 2. make sure `allowVolumeExpansion: true` is set in storage class.
+
+<details>
 
 ```yaml
 apiVersion: storage.k8s.io/v1
@@ -14,76 +20,65 @@ metadata:
 provisioner: disk.csi.azure.com
 allowVolumeExpansion: true
 parameters:
-  skuName: Standard_LRS
-  cachingMode: ReadOnly
-reclaimPolicy: Delete
-volumeBindingMode: Immediate
+  skuName: StandardSSD_LRS
 ```
 
-2. Create storageclass, pvc and pod.
+</details>
+
+## Example
+
+1. create a pod with disk PV mount.
 
 ```console
-kubectl apply -f https://raw.githubusercontent.com/kubernetes-sigs/azuredisk-csi-driver/master/deploy/example/storageclass-azuredisk-csi.yaml
-kubectl apply -f https://raw.githubusercontent.com/kubernetes-sigs/azuredisk-csi-driver/master/deploy/example/pvc-azuredisk-csi.yaml
-kubectl apply -f https://raw.githubusercontent.com/kubernetes-sigs/azuredisk-csi-driver/master/deploy/example/nginx-pod-azuredisk.yaml
+kubectl apply -f https://raw.githubusercontent.com/kubernetes-sigs/azuredisk-csi-driver/master/deploy/example/statefulset.yaml
 ```
 
-3. Check the filesystem size in the container.
+2. check the filesystem size in the container.
 
 ```console
-$ kubectl exec -it nginx-azuredisk -- df -h /mnt/azuredisk
+$ kubectl exec -it statefulset-azuredisk-0 -- df -h /mnt/azuredisk
 Filesystem      Size  Used Avail Use% Mounted on
-/devhost/sdc    9.8G   37M  9.8G   1% /mnt/azuredisk
+/dev/sdc        9.8G   37M  9.8G   1% /mnt/azuredisk
 ```
 
-4. Delete the pod.
+3. expand pvc by increasing the value of `spec.resources.requests.storage`.
 
 ```console
-kubectl delete -f https://raw.githubusercontent.com/kubernetes-sigs/azuredisk-csi-driver/master/deploy/example/nginx-pod-azuredisk.yaml
+kubectl patch pvc persistent-storage-statefulset-azuredisk-0 --type merge --patch '{"spec": {"resources": {"requests": {"storage": "15Gi"}}}}'
 ```
 
-5. Expand the pvc by increasing the field `spec.resources.requests.storage`.
+4. check pvc size after around 2 minutes.
 
 ```console
-$ kubectl edit pvc pvc-azuredisk
-...
-...
-spec:
-  resources:
-    requests:
-      storage: 15Gi
-...
-...
+$ kubectl get pvc persistent-storage-statefulset-azuredisk-0
+NAME                                         STATUS   VOLUME                                     CAPACITY   ACCESS MODES   STORAGECLASS
+persistent-storage-statefulset-azuredisk-0   Bound    pvc-84903bd6-f4da-44f3-b3f7-9b8b59f55b6b   15Gi       RWO            disk.csi.azure.com
 ```
 
-6. Check the pvc and pv size.
+5. verify the filesystem size.
 
 ```console
-$ k get pvc pvc-azuredisk
-NAME            STATUS   VOLUME                                     CAPACITY   ACCESS MODES   STORAGECLASS         AGE
-pvc-azuredisk   Bound    pvc-84903bd6-f4da-44f3-b3f7-9b8b59f55b6b   10Gi       RWO            disk.csi.azure.com   3m11s
-
-$ k get pv pvc-84903bd6-f4da-44f3-b3f7-9b8b59f55b6b
-NAME                                       CAPACITY   ACCESS MODES   RECLAIM POLICY   STATUS   CLAIM                   STORAGECLASS         REASON   AGE
-pvc-84903bd6-f4da-44f3-b3f7-9b8b59f55b6b   15Gi       RWO            Delete           Bound    default/pvc-azuredisk   disk.csi.azure.com            4m2s
-```
-
-After the pvc re-attaches to the container, the size will be updated.
-
-7. Create the new pod.
-
-```console
-kubectl apply -f https://raw.githubusercontent.com/kubernetes-sigs/azuredisk-csi-driver/master/deploy/example/nginx-pod-azuredisk.yaml
-```
-
-8. Verify the filesystem size.
-
-```console
-$ kubectl get pvc pvc-azuredisk
-NAME            STATUS   VOLUME                                     CAPACITY   ACCESS MODES   STORAGECLASS         AGE
-pvc-azuredisk   Bound    pvc-84903bd6-f4da-44f3-b3f7-9b8b59f55b6b   15Gi       RWO            disk.csi.azure.com   7m
-
-$ kubectl exec -it nginx-azuredisk -- df -h /mnt/azuredisk
+$ kubectl exec -it statefulset-azuredisk-0 -- df -h /mnt/azuredisk
 Filesystem      Size  Used Avail Use% Mounted on
-/devhost/sdc     15G   41M   15G   1% /mnt/azuredisk
+/dev/sdc        15G   41M   15G   1% /mnt/azuredisk
 ```
+
+#### successful volume expansion events example
+<details>
+ 
+```console
+$ kubectl get describe persistent-storage-statefulset-azuredisk-0
+Events:
+  Type     Reason                      Age                   From                                                                                       Message
+  ----     ------                      ----                  ----                                                                                       -------
+  Normal   WaitForFirstConsumer        35m (x2 over 35m)     persistentvolume-controller                                                                waiting for first consumer to be created before binding
+  Normal   ExternalProvisioning        35m                   persistentvolume-controller                                                                waiting for a volume to be created, either by external provisioner "disk.csi.azure.com" or manually created by system administrator
+  Normal   Provisioning                35m                   disk.csi.azure.com_aks-agentpool-32806483-vmss000001_010c423f-e720-4b9f-89fa-07b246c920cb  External provisioner is provisioning volume for claim "default/persistent-storage-statefulset-azuredisk-0"
+  Normal   ProvisioningSucceeded       35m                   disk.csi.azure.com_aks-agentpool-32806483-vmss000001_010c423f-e720-4b9f-89fa-07b246c920cb  Successfully provisioned volume pvc-65a8b677-4490-4066-9446-c4067188acab
+  Warning  ExternalExpanding           77s (x3 over 33m)     volume_expand                                                                              Ignoring the PVC: didn't find a plugin capable of expanding the volume; waiting for an external controller to process this PVC.
+  Normal   Resizing                    77s                   external-resizer disk.csi.azure.com                                                        External resizer is resizing volume pvc-65a8b677-4490-4066-9446-c4067188acab
+  Normal   FileSystemResizeRequired    44s                   external-resizer disk.csi.azure.com                                                        Require file system resize of volume on node
+  Normal   FileSystemResizeSuccessful  6s (x3 over 29m)      kubelet                                                                                    MountVolume.NodeExpandVolume succeeded for volume "pvc-65a8b677-4490-4066-9446-c4067188acab"
+```
+
+</details>

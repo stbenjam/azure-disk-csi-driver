@@ -18,12 +18,12 @@ V2: Preview
 
 #### V1
 
-|Driver Version  |Image                                                     | supported k8s version |
-|----------------|----------------------------------------------------------|-----------------------|
-|`master` branch |mcr.microsoft.com/k8s/csi/azuredisk-csi:latest            | 1.19+                 |
-|v1.9.0          |mcr.microsoft.com/oss/kubernetes-csi/azuredisk-csi:v1.9.0 | 1.19+                 |
-|v1.8.0          |mcr.microsoft.com/oss/kubernetes-csi/azuredisk-csi:v1.8.0 | 1.18+                 |
-|v1.7.0          |mcr.microsoft.com/oss/kubernetes-csi/azuredisk-csi:v1.7.0 | 1.18+                 |
+|Driver Version  |Image                                                      | supported k8s version |
+|----------------|-----------------------------------------------------------|-----------------------|
+|`master` branch |mcr.microsoft.com/k8s/csi/azuredisk-csi:latest             | 1.20+                 |
+|v1.16.0         |mcr.microsoft.com/oss/kubernetes-csi/azuredisk-csi:v1.16.0 | 1.20+                 |
+|v1.15.0         |mcr.microsoft.com/oss/kubernetes-csi/azuredisk-csi:v1.15.0 | 1.20+                 |
+|v1.14.0         |mcr.microsoft.com/oss/kubernetes-csi/azuredisk-csi:v1.14.0 | 1.20+                 |
 
 #### V2
 
@@ -43,15 +43,10 @@ follow guide [here](./docs/install-driver-on-aks.md)
 
 ### Prerequisite
 
-- The driver depends on [cloud provider config file](https://kubernetes-sigs.github.io/cloud-provider-azure/install/configs/#setting-azure-cloud-provider-from-kubernetes-secrets), usually it's `/etc/kubernetes/azure.json` on all kubernetes nodes deployed by [AKS](https://docs.microsoft.com/en-us/azure/aks/) or [aks-engine](https://github.com/Azure/aks-engine), here is [azure.json example](./deploy/example/azure.json).
-  > To specify a different cloud provider config file, create `azure-cred-file` configmap before driver installation, e.g. for OpenShift, it's `/etc/kubernetes/cloud.conf` (make sure config file path is in the `volumeMounts.mountPath`)
-  >
-  > ```console
-  > kubectl create configmap azure-cred-file --from-literal=path="/etc/kubernetes/cloud.conf" --from-literal=path-windows="C:\\k\\cloud.conf" -n kube-system
-  > ```
-  >
-- This driver also supports [read cloud config from kuberenetes secret](./docs/read-from-secret.md).
-- If cluster identity is [Managed Service Identity(MSI)](https://docs.microsoft.com/en-us/azure/aks/use-managed-identity), make sure user assigned identity has `Contributor` role on node resource group
+- The driver depends on [cloud provider config file](https://github.com/kubernetes/cloud-provider-azure/blob/master/docs/cloud-provider-config.md), usually it's `/etc/kubernetes/azure.json` on agent nodes deployed by [AKS](https://docs.microsoft.com/en-us/azure/aks/) or [aks-engine](https://github.com/Azure/aks-engine), here is [azure.json example](./deploy/example/azure.json). <details> <summary>specify a different cloud provider config file</summary></br>create `azure-cred-file` configmap before driver installation, e.g. for OpenShift, it's `/etc/kubernetes/cloud.conf` (make sure config file path is in the `volumeMounts.mountPath`)
+</br><pre>```kubectl create configmap azure-cred-file --from-literal=path="/etc/kubernetes/cloud.conf" --from-literal=path-windows="C:\\k\\cloud.conf" -n kube-system```</pre></details>
+- This driver also supports [read cloud config from kubernetes secret](./docs/read-from-secret.md) as first priority
+- Make sure identity used by driver has `Contributor` role on node resource group
   - When installing side-by-side with an earlier version of the driver on an AKS cluster, ensure the agentpool service principal or managed service identity is assigned to the `Contributor` role on the resource groups used to store managed disks.
 - [Set up CSI driver on Azure RedHat OpenShift(ARO)](https://github.com/ezYakaEagle442/aro-pub-storage/blob/master/setup-store-CSI-driver-azure-disk.md)
 
@@ -80,7 +75,7 @@ follow guide [here](./docs/install-driver-on-aks.md)
 - [Shared Disk](./deploy/example/sharedisk)
 - [Volume Limits](./deploy/example/volumelimits)
 - [fsGroupPolicy](./deploy/example/fsgroup)
-- [Tune disk performance on Linux](./docs/enhancements/feat-add-ability-to-tune-azuredisk-performance-parameters.md)
+- [Tune disk performance on Linux](./docs/perf-profiles.md)
 
 #### New in V2
 
@@ -111,7 +106,6 @@ follow guide [here](./docs/install-driver-on-aks.md)
 ### Links
 
 - [Kubernetes CSI Documentation](https://kubernetes-csi.github.io/docs/)
-- [CSI Drivers](https://github.com/kubernetes-csi/drivers)
 - [Container Storage Interface (CSI) Specification](https://github.com/container-storage-interface/spec)
 
 [support-policy]: support.md

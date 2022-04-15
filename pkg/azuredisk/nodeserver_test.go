@@ -23,12 +23,13 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"reflect"
 	"runtime"
 	"syscall"
 	"testing"
 
-	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2020-12-01/compute"
+	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2021-07-01/compute"
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"github.com/golang/mock/gomock"
 	"github.com/stretchr/testify/assert"
@@ -60,8 +61,8 @@ var (
 	provisioningStateSucceeded = "Succeeded"
 
 	testVMName     = fakeNodeID
-	testVMURI      = fmt.Sprint(virtualMachineURIFormat, testSubscription, testResourceGroup, testVMName)
-	testVMSize     = compute.StandardD3V2
+	testVMURI      = fmt.Sprintf(virtualMachineURIFormat, testSubscription, testResourceGroup, testVMName)
+	testVMSize     = compute.VirtualMachineSizeTypesStandardD3V2
 	testVMLocation = "westus"
 	testVMZones    = []string{"1"}
 	testVM         = compute.VirtualMachine{
@@ -115,45 +116,6 @@ func TestNodeGetCapabilities(t *testing.T) {
 	assert.NotNil(t, resp)
 	assert.Equal(t, resp.Capabilities[0].GetType(), capType)
 	assert.NoError(t, err)
-}
-
-func TestGetFStype(t *testing.T) {
-	tests := []struct {
-		options  map[string]string
-		expected string
-	}{
-		{
-			nil,
-			"",
-		},
-		{
-			map[string]string{},
-			"",
-		},
-		{
-			map[string]string{"fstype": ""},
-			"",
-		},
-		{
-			map[string]string{"fstype": "xfs"},
-			"xfs",
-		},
-		{
-			map[string]string{"FSType": "xfs"},
-			"xfs",
-		},
-		{
-			map[string]string{"fstype": "EXT4"},
-			"ext4",
-		},
-	}
-
-	for _, test := range tests {
-		result := getFStype(test.options)
-		if result != test.expected {
-			t.Errorf("input: %q, getFStype result: %s, expected: %s", test.options, result, test.expected)
-		}
-	}
 }
 
 func TestGetMaxDataDiskCount(t *testing.T) {
@@ -303,7 +265,7 @@ func TestNodeGetInfo(t *testing.T) {
 		},
 		{
 			desc:        "[Failure] Get node information for non-existing VM",
-			expectedErr: nil,
+			expectedErr: status.Error(codes.Internal, fmt.Sprintf("getNodeInfoFromLabels on node(%s) failed with %s", "fakeNodeID", "kubeClient is nil")),
 			setupFunc: func(t *testing.T, d FakeDriver) {
 				d.getCloud().VirtualMachinesClient.(*mockvmclient.MockInterface).EXPECT().
 					Get(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
@@ -508,7 +470,7 @@ func TestNodeStageVolume(t *testing.T) {
 				VolumeContext:  volumeContext,
 			},
 
-			expectedErr: status.Error(codes.Internal, "Failed to find disk on lun /dev/01. cannot parse deviceInfo: /dev/01"),
+			expectedErr: status.Error(codes.Internal, "failed to find disk on lun /dev/01. cannot parse deviceInfo: /dev/01"),
 		},
 		{
 			desc:          "Successfully staged",
@@ -693,7 +655,7 @@ func TestNodeUnstageVolume(t *testing.T) {
 func TestNodePublishVolume(t *testing.T) {
 	d, _ := NewFakeDriver(t)
 
-	volumeCap := csi.VolumeCapability_AccessMode{Mode: csi.VolumeCapability_AccessMode_MULTI_NODE_MULTI_WRITER}
+	volumeCap := csi.VolumeCapability_AccessMode{Mode: csi.VolumeCapability_AccessMode_SINGLE_NODE_SINGLE_WRITER}
 	publishContext := map[string]string{
 		consts.LUN: "/dev/01",
 	}
@@ -728,21 +690,21 @@ func TestNodePublishVolume(t *testing.T) {
 	}{
 		{
 			desc: "Volume capabilities missing",
-			req:  csi.NodePublishVolumeRequest{},
+			req:  csi.NodePublishVolumeRequest{VolumeId: "vol_1"},
 			expectedErr: testutil.TestError{
 				DefaultError: status.Error(codes.InvalidArgument, "Volume capability missing in request"),
 			},
 		},
 		{
 			desc: "Volume ID missing",
-			req:  csi.NodePublishVolumeRequest{VolumeCapability: &csi.VolumeCapability{AccessMode: &volumeCap}},
+			req:  csi.NodePublishVolumeRequest{VolumeCapability: &csi.VolumeCapability{AccessMode: &volumeCap, AccessType: stdVolCapBlock}},
 			expectedErr: testutil.TestError{
-				DefaultError: status.Error(codes.InvalidArgument, "Volume ID missing in request"),
+				DefaultError: status.Error(codes.InvalidArgument, "Volume ID missing in the request"),
 			},
 		},
 		{
 			desc: "Staging target path missing",
-			req: csi.NodePublishVolumeRequest{VolumeCapability: &csi.VolumeCapability{AccessMode: &volumeCap},
+			req: csi.NodePublishVolumeRequest{VolumeCapability: &csi.VolumeCapability{AccessMode: &volumeCap, AccessType: stdVolCapBlock},
 				VolumeId: "vol_1"},
 			expectedErr: testutil.TestError{
 				DefaultError: status.Error(codes.InvalidArgument, "Staging target not provided"),
@@ -750,7 +712,7 @@ func TestNodePublishVolume(t *testing.T) {
 		},
 		{
 			desc: "Target path missing",
-			req: csi.NodePublishVolumeRequest{VolumeCapability: &csi.VolumeCapability{AccessMode: &volumeCap},
+			req: csi.NodePublishVolumeRequest{VolumeCapability: &csi.VolumeCapability{AccessMode: &volumeCap, AccessType: stdVolCapBlock},
 				VolumeId:          "vol_1",
 				StagingTargetPath: sourceTest},
 			expectedErr: testutil.TestError{
@@ -766,7 +728,7 @@ func TestNodePublishVolume(t *testing.T) {
 				Readonly:          true},
 			skipOnWindows: true, // permission issues
 			expectedErr: testutil.TestError{
-				DefaultError: status.Errorf(codes.Internal, fmt.Sprintf("Could not mount target \"%s\": "+
+				DefaultError: status.Errorf(codes.Internal, fmt.Sprintf("could not mount target \"%s\": "+
 					"mkdir %s: not a directory", azuredisk, azuredisk)),
 			},
 		},
@@ -790,25 +752,25 @@ func TestNodePublishVolume(t *testing.T) {
 				PublishContext:    publishContext,
 				Readonly:          true},
 			expectedErr: testutil.TestError{
-				DefaultError: status.Error(codes.Internal, "Failed to find device path with lun /dev/01. cannot parse deviceInfo: /dev/01"),
+				DefaultError: status.Error(codes.Internal, "failed to find device path with lun /dev/01. cannot parse deviceInfo: /dev/01"),
 			},
 		},
 		{
 			desc: "[Error] Mount error mocked by Mount",
-			req: csi.NodePublishVolumeRequest{VolumeCapability: &csi.VolumeCapability{AccessMode: &volumeCap},
+			req: csi.NodePublishVolumeRequest{VolumeCapability: &csi.VolumeCapability{AccessMode: &volumeCap, AccessType: stdVolCap},
 				VolumeId:          "vol_1",
 				TargetPath:        targetTest,
 				StagingTargetPath: errorMountSource,
 				Readonly:          true},
 			skipOnWindows: true, // permission issues
 			expectedErr: testutil.TestError{
-				DefaultError: status.Errorf(codes.Internal, fmt.Sprintf("Could not mount \"%s\" at \"%s\": "+
+				DefaultError: status.Errorf(codes.Internal, fmt.Sprintf("could not mount \"%s\" at \"%s\": "+
 					"fake Mount: source error", errorMountSource, targetTest)),
 			},
 		},
 		{
 			desc: "[Success] Valid request already mounted",
-			req: csi.NodePublishVolumeRequest{VolumeCapability: &csi.VolumeCapability{AccessMode: &volumeCap},
+			req: csi.NodePublishVolumeRequest{VolumeCapability: &csi.VolumeCapability{AccessMode: &volumeCap, AccessType: stdVolCap},
 				VolumeId:          "vol_1",
 				TargetPath:        alreadyMountedTarget,
 				StagingTargetPath: sourceTest,
@@ -818,7 +780,7 @@ func TestNodePublishVolume(t *testing.T) {
 		},
 		{
 			desc: "[Success] Valid request",
-			req: csi.NodePublishVolumeRequest{VolumeCapability: &csi.VolumeCapability{AccessMode: &volumeCap},
+			req: csi.NodePublishVolumeRequest{VolumeCapability: &csi.VolumeCapability{AccessMode: &volumeCap, AccessType: stdVolCap},
 				VolumeId:          "vol_1",
 				TargetPath:        targetTest,
 				StagingTargetPath: sourceTest,
@@ -878,7 +840,7 @@ func TestNodeUnpublishVolume(t *testing.T) {
 			desc: "Volume ID missing",
 			req:  csi.NodeUnpublishVolumeRequest{TargetPath: targetTest},
 			expectedErr: testutil.TestError{
-				DefaultError: status.Error(codes.InvalidArgument, "Volume ID missing in request"),
+				DefaultError: status.Error(codes.InvalidArgument, "Volume ID missing in the request"),
 			},
 		},
 		{
@@ -940,7 +902,6 @@ func TestNodeExpandVolume(t *testing.T) {
 	_ = makeDir(blockVolumePath)
 	_ = makeDir(targetTest)
 	notFoundErr := errors.New("exit status 1")
-	volumeCapWrong := csi.VolumeCapability_AccessMode{Mode: 10}
 
 	stdCapacityRange = &csi.CapacityRange{
 		RequiredBytes: volumehelper.GiBToBytes(15),
@@ -950,19 +911,17 @@ func TestNodeExpandVolume(t *testing.T) {
 	invalidPathErr := testutil.TestError{
 		DefaultError: status.Error(codes.NotFound, "failed to determine device path for volumePath [./test]: path \"./test\" does not exist"),
 	}
-	volumeCapacityErr := testutil.TestError{
-		DefaultError: status.Error(codes.InvalidArgument, "VolumeCapability is invalid."),
-	}
+
 	devicePathErr := testutil.TestError{
 		DefaultError: status.Errorf(codes.NotFound, "could not determine device path(%s), error: %v", targetTest, notFoundErr),
 		WindowsError: status.Errorf(codes.NotFound, "error getting the volume for the mount %s, internal error error getting volume from mount. cmd: (Get-Item -Path %s).Target, output: , error: <nil>", targetTest, targetTest),
 	}
 	blockSizeErr := testutil.TestError{
-		DefaultError: status.Error(codes.Internal, "Could not get size of block volume at path test: error when getting size of block volume at path test: output: , err: exit status 1"),
+		DefaultError: status.Error(codes.Internal, "could not get size of block volume at path test: error when getting size of block volume at path test: output: , err: exit status 1"),
 		WindowsError: status.Errorf(codes.NotFound, "error getting the volume for the mount %s, internal error error getting volume from mount. cmd: (Get-Item -Path %s).Target, output: , error: <nil>", targetTest, targetTest),
 	}
 	resizeErr := testutil.TestError{
-		DefaultError: status.Errorf(codes.Internal, "Could not resize volume \"test\" (\"test\"):  resize of device test failed: %v. resize2fs output: ", notFoundErr),
+		DefaultError: status.Errorf(codes.Internal, "could not resize volume \"test\" (\"test\"):  resize of device test failed: %v. resize2fs output: ", notFoundErr),
 		WindowsError: status.Errorf(codes.NotFound, "error getting the volume for the mount %s, internal error error getting volume from mount. cmd: (Get-Item -Path %s).Target, output: , error: <nil>", targetTest, targetTest),
 	}
 	sizeTooSmallErr := testutil.TestError{
@@ -1026,17 +985,6 @@ func TestNodeExpandVolume(t *testing.T) {
 			expectedErr: testutil.TestError{
 				DefaultError: status.Error(codes.InvalidArgument, "volume path must be provided"),
 			},
-		},
-		{
-			desc: "Volume capacity invalid",
-			req: csi.NodeExpandVolumeRequest{
-				CapacityRange:     stdCapacityRange,
-				VolumePath:        targetTest,
-				VolumeId:          "test",
-				StagingTargetPath: "test",
-				VolumeCapability:  &csi.VolumeCapability{AccessMode: &volumeCapWrong},
-			},
-			expectedErr: volumeCapacityErr,
 		},
 		{
 			desc: "Invalid device path",
@@ -1226,8 +1174,8 @@ func TestEnsureBlockTargetFile(t *testing.T) {
 			desc: "test if file exists",
 			req:  testPath,
 			expectedErr: testutil.TestError{
-				DefaultError: status.Error(codes.Internal, fmt.Sprintf("Could not mount target \"%s\": mkdir %s: not a directory", testTarget, testTarget)),
-				WindowsError: status.Error(codes.Internal, fmt.Sprintf("Could not remove mount target %#v: remove %s: The system cannot find the path specified.", testPath, testPath)),
+				DefaultError: status.Error(codes.Internal, fmt.Sprintf("could not mount target \"%s\": mkdir %s: not a directory", testTarget, testTarget)),
+				WindowsError: status.Error(codes.Internal, fmt.Sprintf("could not remove mount target %#v: remove %s: The system cannot find the path specified.", testPath, testPath)),
 			},
 		},
 	}
@@ -1328,4 +1276,51 @@ func TestGetDevicePathWithMountPath(t *testing.T) {
 			}
 		}
 	}
+}
+
+func TestNodePublishVolumeIdempotentMount(t *testing.T) {
+	if runtime.GOOS == "windows" || os.Getuid() != 0 {
+		return
+	}
+	stdVolCap := &csi.VolumeCapability_Mount{
+		Mount: &csi.VolumeCapability_MountVolume{
+			FsType: defaultLinuxFsType,
+		},
+	}
+	_ = makeDir(sourceTest)
+	_ = makeDir(targetTest)
+	d, _ := NewFakeDriver(t)
+
+	volumeCap := csi.VolumeCapability_AccessMode{Mode: csi.VolumeCapability_AccessMode_SINGLE_NODE_WRITER}
+	req := csi.NodePublishVolumeRequest{VolumeCapability: &csi.VolumeCapability{AccessMode: &volumeCap, AccessType: stdVolCap},
+		VolumeId:          "vol_1",
+		TargetPath:        targetTest,
+		StagingTargetPath: sourceTest,
+		Readonly:          true}
+
+	_, err := d.NodePublishVolume(context.Background(), &req)
+	assert.NoError(t, err)
+	_, err = d.NodePublishVolume(context.Background(), &req)
+	assert.NoError(t, err)
+
+	// ensure the target not be mounted twice
+	targetAbs, err := filepath.Abs(targetTest)
+	assert.NoError(t, err)
+
+	mountList, err := d.getMounter().List()
+	assert.NoError(t, err)
+	mountPointNum := 0
+	for _, mountPoint := range mountList {
+		if mountPoint.Path == targetAbs {
+			mountPointNum++
+		}
+	}
+	assert.Equal(t, 1, mountPointNum)
+	err = d.getMounter().Unmount(targetTest)
+	assert.NoError(t, err)
+	_ = d.getMounter().Unmount(targetTest)
+	err = os.RemoveAll(sourceTest)
+	assert.NoError(t, err)
+	err = os.RemoveAll(targetTest)
+	assert.NoError(t, err)
 }

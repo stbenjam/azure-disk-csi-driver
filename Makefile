@@ -19,7 +19,7 @@ REGISTRY_NAME ?= $(shell echo $(REGISTRY) | sed "s/.azurecr.io//g")
 IMAGE_NAME ?= azuredisk-csi
 ifneq ($(BUILD_V2), true)
 PLUGIN_NAME = azurediskplugin
-IMAGE_VERSION ?= v1.9.0
+IMAGE_VERSION ?= v1.16.0
 CHART_VERSION ?= latest
 else
 PLUGIN_NAME = azurediskpluginv2
@@ -42,6 +42,9 @@ ENABLE_TOPOLOGY ?= false
 LDFLAGS ?= "-X ${PKG}/pkg/azuredisk.driverVersion=${IMAGE_VERSION} -X ${PKG}/pkg/azuredisk.gitCommit=${GIT_COMMIT} -X ${PKG}/pkg/azuredisk.buildDate=${BUILD_DATE} -extldflags "-static"" ${GOTAGS}
 E2E_HELM_OPTIONS ?= --set image.azuredisk.repository=$(REGISTRY)/$(IMAGE_NAME) --set image.azuredisk.tag=$(IMAGE_VERSION) --set image.azuredisk.pullPolicy=Always --set driver.userAgentSuffix="e2e-test"
 E2E_HELM_OPTIONS += ${EXTRA_HELM_OPTIONS}
+ifdef DISABLE_ZONE
+E2E_HELM_OPTIONS += --set node.supportZone=false
+endif
 GINKGO_FLAGS = -ginkgo.v
 ifeq ($(ENABLE_TOPOLOGY), true)
 GINKGO_FLAGS += -ginkgo.focus="\[multi-az\]"
@@ -59,9 +62,12 @@ ALL_OS = linux windows
 ALL_ARCH.linux = amd64 arm64
 ALL_OS_ARCH.linux = $(foreach arch, ${ALL_ARCH.linux}, linux-$(arch))
 ALL_ARCH.windows = amd64
-ALL_OSVERSIONS.windows := 1809 1903 1909 2004 20H2 ltsc2022
+ALL_OSVERSIONS.windows := 1809 20H2 ltsc2022
 ALL_OS_ARCH.windows = $(foreach arch, $(ALL_ARCH.windows), $(foreach osversion, ${ALL_OSVERSIONS.windows}, windows-${osversion}-${arch}))
 ALL_OS_ARCH = $(foreach os, $(ALL_OS), ${ALL_OS_ARCH.${os}})
+
+# If set to true Windows containers will run as HostProcessContainers
+WINDOWS_USE_HOST_PROCESS_CONTAINERS ?= false
 
 # The current context of image building
 # The architecture of the image
@@ -114,8 +120,8 @@ ifdef TEST_WINDOWS
 	helm install azuredisk-csi-driver charts/${CHART_VERSION}/azuredisk-csi-driver --namespace kube-system --wait --timeout=15m -v=5 --debug \
 		${E2E_HELM_OPTIONS} \
 		--set windows.enabled=true \
+		--set windows.useHostProcessContainers=${WINDOWS_USE_HOST_PROCESS_CONTAINERS} \
 		--set linux.enabled=false \
-		--set controller.runOnMaster=true \
 		--set controller.replicas=1 \
 		--set controller.logLevel=6 \
 		--set node.logLevel=6 \
@@ -216,7 +222,7 @@ push-manifest:
 	docker manifest push --purge $(IMAGE_TAG)
 	docker manifest inspect $(IMAGE_TAG)
 ifdef PUBLISH
-	docker manifest create $(IMAGE_TAG_LATEST) $(foreach osarch, $(ALL_OS_ARCH), $(IMAGE_TAG)-${osarch})
+	docker manifest create --amend $(IMAGE_TAG_LATEST) $(foreach osarch, $(ALL_OS_ARCH), $(IMAGE_TAG)-${osarch})
 	set -x; \
 	for arch in $(ALL_ARCH.windows); do \
 		for osversion in $(ALL_OSVERSIONS.windows); do \
@@ -254,5 +260,6 @@ e2e-test:
 	if [ ! -z "$(EXTERNAL_E2E_TEST)" ]; then \
 		bash ./test/external-e2e/run.sh;\
 	else \
+		bash ./hack/parse-prow-creds.sh;\
 		go test -v -timeout=0 ./test/e2e ${GINKGO_FLAGS};\
 	fi

@@ -21,7 +21,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2020-12-01/compute"
+	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2021-07-01/compute"
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"github.com/golang/mock/gomock"
 	"github.com/stretchr/testify/assert"
@@ -67,7 +67,7 @@ var (
 type FakeDriver interface {
 	CSIDriver
 
-	GetSourceDiskSize(ctx context.Context, resourceGroup, diskName string, curDepth, maxDepth int) (*int32, error)
+	GetSourceDiskSize(ctx context.Context, subsID, resourceGroup, diskName string, curDepth, maxDepth int) (*int32, error)
 
 	setNextCommandOutputScripts(scripts ...testingexec.FakeAction)
 
@@ -85,10 +85,10 @@ type FakeDriver interface {
 	getDeviceHelper() optimization.Interface
 	getHostUtil() hostUtil
 
-	checkDiskCapacity(context.Context, string, string, int) (bool, error)
+	checkDiskCapacity(context.Context, string, string, string, int) (bool, error)
 	checkDiskExists(ctx context.Context, diskURI string) (*compute.Disk, error)
-	getSnapshotInfo(string) (string, string, error)
-	getSnapshotByID(context.Context, string, string, string) (*csi.Snapshot, error)
+	getSnapshotInfo(string) (string, string, string, error)
+	getSnapshotByID(context.Context, string, string, string, string) (*csi.Snapshot, error)
 	ensureMountPoint(string) (bool, error)
 	ensureBlockTargetFile(string) error
 	getDevicePathWithLUN(lunStr string) (string, error)
@@ -107,6 +107,7 @@ func newFakeDriverV1(t *testing.T) (*fakeDriverV1, error) {
 	driver.CSIDriver = *csicommon.NewFakeCSIDriver()
 	driver.volumeLocks = volumehelper.NewVolumeLocks()
 	driver.VolumeAttachLimit = -1
+	driver.supportZone = true
 	driver.ioHandler = azureutils.NewFakeIOHandler()
 	driver.hostUtil = azureutils.NewFakeHostUtil()
 	driver.useCSIProxyGAInterface = true

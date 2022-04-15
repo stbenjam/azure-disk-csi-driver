@@ -23,12 +23,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2020-12-01/compute"
+	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2021-07-01/compute"
 	"github.com/container-storage-interface/spec/lib/go/csi"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/klog/v2"
 	"k8s.io/kubernetes/pkg/volume/util/hostutil"
 	"k8s.io/mount-utils"
@@ -58,6 +60,12 @@ type DriverOptions struct {
 	UseCSIProxyGAInterface     bool
 	EnableDiskOnlineResize     bool
 	AllowEmptyCloudConfig      bool
+	EnableAsyncAttach          bool
+	EnableListVolumes          bool
+	EnableListSnapshots        bool
+	SupportZone                bool
+	GetNodeInfoFromLabels      bool
+	EnableDiskCapacityCheck    bool
 }
 
 // CSIDriver defines the interface for a CSI driver.
@@ -91,6 +99,12 @@ type DriverCore struct {
 	useCSIProxyGAInterface     bool
 	enableDiskOnlineResize     bool
 	allowEmptyCloudConfig      bool
+	enableAsyncAttach          bool
+	enableListVolumes          bool
+	enableListSnapshots        bool
+	supportZone                bool
+	getNodeInfoFromLabels      bool
+	enableDiskCapacityCheck    bool
 }
 
 // Driver is the v1 implementation of the Azure Disk CSI Driver.
@@ -117,6 +131,12 @@ func newDriverV1(options *DriverOptions) *Driver {
 	driver.useCSIProxyGAInterface = options.UseCSIProxyGAInterface
 	driver.enableDiskOnlineResize = options.EnableDiskOnlineResize
 	driver.allowEmptyCloudConfig = options.AllowEmptyCloudConfig
+	driver.enableAsyncAttach = options.EnableAsyncAttach
+	driver.enableListVolumes = options.EnableListVolumes
+	driver.enableListSnapshots = options.EnableListVolumes
+	driver.supportZone = options.SupportZone
+	driver.getNodeInfoFromLabels = options.GetNodeInfoFromLabels
+	driver.enableDiskCapacityCheck = options.EnableDiskCapacityCheck
 	driver.volumeLocks = volumehelper.NewVolumeLocks()
 	driver.ioHandler = azureutils.NewOSIOHandler()
 	driver.hostUtil = hostutil.NewHostUtil()
@@ -170,9 +190,9 @@ func (d *Driver) Run(endpoint, kubeconfig string, disableAVSetNodes, testingMock
 	d.deviceHelper = optimization.NewSafeDeviceHelper()
 
 	if d.getPerfOptimizationEnabled() {
-		d.nodeInfo, err = optimization.NewNodeInfo(d.getCloud(), d.NodeID)
+		d.nodeInfo, err = optimization.NewNodeInfo(context.TODO(), d.getCloud(), d.NodeID)
 		if err != nil {
-			klog.Errorf("Failed to get node info. Error: %v", err)
+			klog.Warningf("Failed to get node info. Error: %v", err)
 		}
 	}
 
@@ -181,18 +201,22 @@ func (d *Driver) Run(endpoint, kubeconfig string, disableAVSetNodes, testingMock
 		klog.Fatalf("Failed to get safe mounter. Error: %v", err)
 	}
 
-	d.AddControllerServiceCapabilities(
-		[]csi.ControllerServiceCapability_RPC_Type{
-			csi.ControllerServiceCapability_RPC_CREATE_DELETE_VOLUME,
-			csi.ControllerServiceCapability_RPC_PUBLISH_UNPUBLISH_VOLUME,
-			csi.ControllerServiceCapability_RPC_CREATE_DELETE_SNAPSHOT,
-			csi.ControllerServiceCapability_RPC_LIST_SNAPSHOTS,
-			csi.ControllerServiceCapability_RPC_CLONE_VOLUME,
-			csi.ControllerServiceCapability_RPC_EXPAND_VOLUME,
-			csi.ControllerServiceCapability_RPC_LIST_VOLUMES,
-			csi.ControllerServiceCapability_RPC_LIST_VOLUMES_PUBLISHED_NODES,
-			csi.ControllerServiceCapability_RPC_SINGLE_NODE_MULTI_WRITER,
-		})
+	controllerCap := []csi.ControllerServiceCapability_RPC_Type{
+		csi.ControllerServiceCapability_RPC_CREATE_DELETE_VOLUME,
+		csi.ControllerServiceCapability_RPC_PUBLISH_UNPUBLISH_VOLUME,
+		csi.ControllerServiceCapability_RPC_CREATE_DELETE_SNAPSHOT,
+		csi.ControllerServiceCapability_RPC_CLONE_VOLUME,
+		csi.ControllerServiceCapability_RPC_EXPAND_VOLUME,
+		csi.ControllerServiceCapability_RPC_SINGLE_NODE_MULTI_WRITER,
+	}
+	if d.enableListVolumes {
+		controllerCap = append(controllerCap, csi.ControllerServiceCapability_RPC_LIST_VOLUMES, csi.ControllerServiceCapability_RPC_LIST_VOLUMES_PUBLISHED_NODES)
+	}
+	if d.enableListSnapshots {
+		controllerCap = append(controllerCap, csi.ControllerServiceCapability_RPC_LIST_SNAPSHOTS)
+	}
+
+	d.AddControllerServiceCapabilities(controllerCap)
 	d.AddVolumeCapabilityAccessModes(
 		[]csi.VolumeCapability_AccessMode_Mode{
 			csi.VolumeCapability_AccessMode_SINGLE_NODE_WRITER,
@@ -237,10 +261,10 @@ func (d *Driver) checkDiskExists(ctx context.Context, diskURI string) (*compute.
 		klog.Warningf("skip checkDiskExists(%s) since it's still in throttling", diskURI)
 		return nil, nil
 	}
-
-	disk, rerr := d.cloud.DisksClient.Get(ctx, resourceGroup, diskName)
+	subsID := azureutils.GetSubscriptionIDFromURI(diskURI)
+	disk, rerr := d.cloud.DisksClient.Get(ctx, subsID, resourceGroup, diskName)
 	if rerr != nil {
-		if strings.Contains(rerr.RawError.Error(), consts.RateLimited) {
+		if rerr.IsThrottled() || strings.Contains(rerr.RawError.Error(), consts.RateLimited) {
 			klog.Warningf("checkDiskExists(%s) is throttled with error: %v", diskURI, rerr.Error())
 			d.getDiskThrottlingCache.Set(consts.ThrottlingKey, "")
 			return nil, nil
@@ -251,13 +275,13 @@ func (d *Driver) checkDiskExists(ctx context.Context, diskURI string) (*compute.
 	return &disk, nil
 }
 
-func (d *Driver) checkDiskCapacity(ctx context.Context, resourceGroup, diskName string, requestGiB int) (bool, error) {
+func (d *Driver) checkDiskCapacity(ctx context.Context, subsID, resourceGroup, diskName string, requestGiB int) (bool, error) {
 	if d.isGetDiskThrottled() {
-		klog.Warningf("skip checkDiskCapacity((%s, %s) since it's still in throttling", resourceGroup, diskName)
+		klog.Warningf("skip checkDiskCapacity(%s, %s) since it's still in throttling", resourceGroup, diskName)
 		return true, nil
 	}
 
-	disk, rerr := d.cloud.DisksClient.Get(ctx, resourceGroup, diskName)
+	disk, rerr := d.cloud.DisksClient.Get(ctx, subsID, resourceGroup, diskName)
 	// Because we can not judge the reason of the error. Maybe the disk does not exist.
 	// So here we do not handle the error.
 	if rerr == nil {
@@ -265,7 +289,7 @@ func (d *Driver) checkDiskCapacity(ctx context.Context, resourceGroup, diskName 
 			return false, status.Errorf(codes.AlreadyExists, "the request volume already exists, but its capacity(%v) is different from (%v)", *disk.DiskProperties.DiskSizeGB, requestGiB)
 		}
 	} else {
-		if strings.Contains(rerr.RawError.Error(), consts.RateLimited) {
+		if rerr.IsThrottled() || strings.Contains(rerr.RawError.Error(), consts.RateLimited) {
 			klog.Warningf("checkDiskCapacity(%s, %s) is throttled with error: %v", resourceGroup, diskName, rerr.Error())
 			d.getDiskThrottlingCache.Set(consts.ThrottlingKey, "")
 		}
@@ -344,4 +368,21 @@ func (d *DriverCore) getNodeInfo() *optimization.NodeInfo {
 
 func (d *DriverCore) getHostUtil() hostUtil {
 	return d.hostUtil
+}
+
+// getNodeInfoFromLabels get zone, instanceType from node labels
+func getNodeInfoFromLabels(ctx context.Context, nodeName string, kubeClient clientset.Interface) (string, string, error) {
+	if kubeClient == nil || kubeClient.CoreV1() == nil {
+		return "", "", fmt.Errorf("kubeClient is nil")
+	}
+
+	node, err := kubeClient.CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
+	if err != nil {
+		return "", "", fmt.Errorf("get node(%s) failed with %v", nodeName, err)
+	}
+
+	if len(node.Labels) == 0 {
+		return "", "", fmt.Errorf("node(%s) label is empty", nodeName)
+	}
+	return node.Labels[consts.WellKnownTopologyKey], node.Labels[consts.InstanceTypeKey], nil
 }

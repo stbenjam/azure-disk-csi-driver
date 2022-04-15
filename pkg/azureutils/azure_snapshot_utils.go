@@ -21,7 +21,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2020-12-01/compute"
+	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2021-07-01/compute"
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -36,7 +36,7 @@ func GenerateCSISnapshot(sourceVolumeID string, snapshot *compute.Snapshot) (*cs
 
 	tp := timestamppb.New(snapshot.SnapshotProperties.TimeCreated.ToTime())
 	if tp == nil {
-		return nil, fmt.Errorf("failed to covert timestamp(%v)", snapshot.SnapshotProperties.TimeCreated.ToTime())
+		return nil, fmt.Errorf("failed to convert timestamp(%v)", snapshot.SnapshotProperties.TimeCreated.ToTime())
 	}
 	ready, _ := isCSISnapshotReady(*snapshot.SnapshotProperties.ProvisioningState)
 
