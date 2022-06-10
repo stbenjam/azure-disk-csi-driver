@@ -116,10 +116,6 @@ func findDiskByLunWithConstraint(lun int, io azureutils.IOHandler, azureDisks []
 					klog.Errorf("failed to parse target from %v (%v), err %v", arr[0], name, err)
 					continue
 				}
-				// as observed, targets 0-3 are used by OS disks. Skip them
-				if target <= 3 {
-					continue
-				}
 			}
 
 			// extract LUN from the path.
